@@ -44,6 +44,7 @@ public class DynatraceGetTimeSeries {
 
     static {
         ///------requesting only infrastructure and services metrics-------------//
+        ///------requesting only infrastructure and services metrics-------------//
         TIMESERIES_INFRA_MAP.put("com.dynatrace.builtin:host.availability", "AVG");
         TIMESERIES_INFRA_MAP.put("com.dynatrace.builtin:host.cpu.idle", "AVG");
         TIMESERIES_INFRA_MAP.put("com.dynatrace.builtin:host.cpu.iowait", "AVG");
@@ -303,7 +304,11 @@ public class DynatraceGetTimeSeries {
     private void sendTokenIngetParam(final Map<String, String> param) {
         param.put("Api-Token", dynatraceApiKey);
     }
+public void sendOne(final Map<String,String> param) {param.put("includeData","true");}
+public void sendTwo(final Map<String,String> param) {param.put("aggregationType","AVG");}
+public void sendThree(final Map<String,String>param) {param.put("relativeTime","day");}
 
+public void sendFour(final Map<String,String> param) {param.put("tag","jvm");}
     public void setTestToStop() {
         isRunning = false;
     }
@@ -314,61 +319,58 @@ public class DynatraceGetTimeSeries {
         timeInMillisSinceEpoch123 -= 120000;
         return timeInMillisSinceEpoch123;
     }
-
-    private List<DynatraceMetric> getTimeSeriesMetricData(final String timeSeries,
-                                                          final String aggregate, final List<String> listEntityId)
+    public ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+    public void sendFive(final Map<String,String>param) {param.put("endTimestamp",String.valueOf(now.toInstant().toEpochMilli()));}
+    public void sendSix(final Map<String,String>param) {param.put("startTimestamp",String.valueOf(getUtcDate()));}
+    private List<DynatraceMetric> getTimeSeriesMetricData(final String timeSeries,final String aggregate,final List<String> listEntityId)
             throws Exception {
         JSONObject jsonApplication;
 
-        final String url = DynatraceUtils.getDynatraceApiUrl(dynatraceManagedHostname, dynatraceId) + DYNATRACE_TIMESERIES + "/" + timeSeries;
+        final String url = DynatraceUtils.getDynatraceApiUrl(dynatraceManagedHostname, dynatraceId) + DYNATRACE_TIMESERIES + "/" + timeSeries ;
         final Map<String, String> parameters = new HashMap<>();
+                //"?includeData=true&aggregationType=AVG&relativeTime=day&tag=jvm";
+        sendOne(parameters);
+        sendTwo(parameters);
+        //sendThree(parameters);
+        sendFour(parameters);
+        sendFive(parameters);
+        sendSix(parameters);
+
         sendTokenIngetParam(parameters);
 
-        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
 
-        final StringBuilder jsonEntitiesBuilder = new StringBuilder().append("{");
-        if(aggregate != null){
-            jsonEntitiesBuilder.append("\"aggregationType\": \"").append(aggregate.toLowerCase()).append("\",");
-        }
-        jsonEntitiesBuilder
-                .append("\"timeseriesId\" : \"").append(timeSeries).append("\",")
-                .append("\"includeData\" : \"true\",")
-                .append("\"endTimestamp\":\"").append(String.valueOf(now.toInstant().toEpochMilli())).append("\",")
-                .append("\"startTimestamp\":\"").append(String.valueOf(getUtcDate())).append("\",")
-                .append("\"entities\":[");
 
-        for (String entit : listEntityId) {
-            jsonEntitiesBuilder.append("\"").append(entit).append("\",");
-        }
 
-        final String bodyJson = jsonEntitiesBuilder.substring(0, jsonEntitiesBuilder.length() - 1) + "]}";
         final Optional<Proxy> proxy = getProxy(proxyName, url);
-        httpGenerator = HTTPGenerator.newJsonHttpGenerator(HTTP_POST_METHOD, url, header, parameters, proxy, bodyJson);
+        httpGenerator = new HTTPGenerator(HTTP_GET_METHOD, url, header, parameters, proxy);
 
         final List<DynatraceMetric> metrics = new ArrayList<>();
+
+
         try {
             if(traceMode){
-                context.getLogger().info("Dynatrace service, get timeseries:\n" + httpGenerator.getRequest() + "\n" + bodyJson);
+                context.getLogger().info("Dynatrace service, get timeseries:\n" + httpGenerator.getRequest() + "\n" );
             }
             final HttpResponse httpResponse = httpGenerator.execute();
-
             final int statusCode = httpResponse.getStatusLine().getStatusCode();
             if (HttpResponseUtils.isSuccessHttpCode(statusCode)) {
                 jsonApplication = HttpResponseUtils.getJsonResponse(httpResponse);
-                if (jsonApplication == null || !jsonApplication.has("result")) {
-                    context.getLogger().debug("No timeseries found.");
+
+                if (jsonApplication == null) {
                     return Collections.emptyList();
                 }
-                jsonApplication = jsonApplication.getJSONObject("result");
-                if (jsonApplication.has("dataPoints") && jsonApplication.has("entities")) {
+                jsonApplication = jsonApplication.getJSONObject("dataResult");
+                if (jsonApplication.has("dataPoints")) {
                     final JSONObject jsonEntity = jsonApplication.getJSONObject("entities");
                     final Map<String, String> entities = getEntityDefinition(jsonEntity);
-
+//added key
                     final JSONObject jsonDataPoint = jsonApplication.getJSONObject("dataPoints");
                     final Iterator<?> keysIterator = jsonDataPoint.keys();
                     while (keysIterator.hasNext()) {
                         final String entity = (String) keysIterator.next();
+                        context.getLogger().info(entity+"---------------");
                         final String displayName = getEntityDisplayName(entities, entity);
+                        context.getLogger().info(displayName+"------------");
                         final JSONArray arr = jsonDataPoint.getJSONArray(entity);
                         addDataMetrics(metrics, jsonApplication, entity, displayName, arr);
                     }
@@ -379,13 +381,15 @@ public class DynatraceGetTimeSeries {
             }
             else if(statusCode != HttpStatus.SC_BAD_REQUEST && statusCode != HttpStatus.SC_NOT_FOUND){
                 final String stringResponse = HttpResponseUtils.getStringResponse(httpResponse);
-                throw new DynatraceException(httpResponse.getStatusLine().getReasonPhrase() + " - "+ url + " - "+ bodyJson + " - " + stringResponse);
+                throw new DynatraceException(httpResponse.getStatusLine().getReasonPhrase() + " - "+ url + " - "+ " - " + stringResponse);
             }
         } finally {
             httpGenerator.closeHttpClient();
         }
         return metrics;
     }
+
+
 
     private void addDataMetrics(final List<DynatraceMetric> metrics, final JSONObject jsonApplication,
                                 final String entity, final String displayName, final JSONArray jsonArray) {
@@ -396,10 +400,12 @@ public class DynatraceGetTimeSeries {
                 DateTime utcTime = new DateTime(time, DateTimeZone.UTC);
                 final DateTime localTime = utcTime.withZone(DateTimeZone.getDefault());
 
-                if (time >= startTS) {
+                if (time >= 1) {
                     final String unit = jsonApplication.getString("unit");
                     final double value = data.getDouble(1);
                     final String timeseriesId = jsonApplication.getString("timeseriesId");
+                    context.getLogger().info(timeseriesId);
+                    context.getLogger().info(unit);
                     final DynatraceMetric metric = new DynatraceMetric(unit, value, localTime.getMillis(), displayName, timeseriesId, entity);
                     metrics.add(metric);
                 }
