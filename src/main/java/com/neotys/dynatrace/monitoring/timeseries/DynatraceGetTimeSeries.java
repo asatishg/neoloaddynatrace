@@ -408,6 +408,7 @@ public void sendFour(final Map<String,String> param) {param.put("tag","jvm");}
                     context.getLogger().info(unit);
                     final DynatraceMetric metric = new DynatraceMetric(unit, value, localTime.getMillis(), displayName, timeseriesId, entity);
                     metrics.add(metric);
+                    
                 }
             }
 
